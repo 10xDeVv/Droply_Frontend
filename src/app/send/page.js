@@ -5,10 +5,10 @@ import { useApp } from "../InstantShareContext";
 
 function Nav() {
   return (
-    <nav className="nav">
-      <div className="logo">Droply</div>
-      <Link href="/" className="nav-item">Home</Link>
-    </nav>
+      <nav className="flex items-center justify-between py-12 mb-16">
+        <div className="text-lg font-medium text-white">Droply</div>
+        <Link href="/" className="text-sm text-gray-400 px-4 py-2 transition-colors duration-150 hover:text-white">Home</Link>
+      </nav>
   );
 }
 
@@ -35,15 +35,37 @@ function OTPInputs({ onChange }){
   };
 
   return (
-    <div className="otp-container" id="otpContainer">
-      {[0,1,2].map(i => (
-        <input key={i} ref={el => inputsRef.current[i]=el} type="text" className={`otp-input ${values[i] ? 'filled' : ''}`} maxLength={1} autoComplete="off" aria-label={`${i+1} digit`} value={values[i]} onChange={(e)=>setAt(i,e.target.value)} onKeyDown={(e)=>onKeyDown(e,i)} />
-      ))}
-      <span className="otp-separator">-</span>
-      {[3,4,5].map(i => (
-        <input key={i} ref={el => inputsRef.current[i]=el} type="text" className={`otp-input ${values[i] ? 'filled' : ''}`} maxLength={1} autoComplete="off" aria-label={`${i+1} digit`} value={values[i]} onChange={(e)=>setAt(i,e.target.value)} onKeyDown={(e)=>onKeyDown(e,i)} />
-      ))}
-    </div>
+      <div className="flex gap-4 justify-center items-center my-8" id="otpContainer">
+        {[0,1,2].map(i => (
+            <input
+                key={i}
+                ref={el => inputsRef.current[i]=el}
+                type="text"
+                className={`w-12 h-16 bg-gray-900 border ${values[i] ? 'border-[#00ff88] bg-gray-800' : 'border-gray-800'} rounded text-white text-xl font-medium text-center font-mono transition-all duration-150 focus:outline-none focus:border-[#00ff88] focus:bg-gray-800`}
+                maxLength={1}
+                autoComplete="off"
+                aria-label={`${i+1} digit`}
+                value={values[i]}
+                onChange={(e)=>setAt(i,e.target.value)}
+                onKeyDown={(e)=>onKeyDown(e,i)}
+            />
+        ))}
+        <span className="text-2xl text-gray-500 mx-2">-</span>
+        {[3,4,5].map(i => (
+            <input
+                key={i}
+                ref={el => inputsRef.current[i]=el}
+                type="text"
+                className={`w-12 h-16 bg-gray-900 border ${values[i] ? 'border-[#00ff88] bg-gray-800' : 'border-gray-800'} rounded text-white text-xl font-medium text-center font-mono transition-all duration-150 focus:outline-none focus:border-[#00ff88] focus:bg-gray-800`}
+                maxLength={1}
+                autoComplete="off"
+                aria-label={`${i+1} digit`}
+                value={values[i]}
+                onChange={(e)=>setAt(i,e.target.value)}
+                onKeyDown={(e)=>onKeyDown(e,i)}
+            />
+        ))}
+      </div>
   );
 }
 
@@ -51,30 +73,30 @@ function UploadList(){
   const { files, formatFileSize } = useApp();
   if (files.length === 0) return null;
   return (
-    <div id="uploadList" className="file-list">
-      {files.map(file => (
-        <div key={file.id} className="file-item">
-          <div className="file-info">
-            <div className="file-icon">📄</div>
-            <div className="file-details">
-              <h4>{file.name}</h4>
-              <p>{formatFileSize(file.size)}</p>
-              {file.status === 'uploading' && (
-                <div className="progress-bar">
-                  <div className="progress-fill" style={{ width: `${file.progress}%` }}></div>
+      <div id="uploadList" className="my-12">
+        {files.map(file => (
+            <div key={file.id} className="flex items-center justify-between p-6 bg-gray-900 border border-gray-800 rounded mb-4 transition-all duration-150 hover:bg-gray-800 hover:border-gray-500">
+              <div className="flex items-center gap-6">
+                <div className="w-8 h-8 bg-[#00ff88] rounded flex items-center justify-center text-sm text-black">📄</div>
+                <div>
+                  <h4 className="text-sm font-medium mb-0.5">{file.name}</h4>
+                  <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
+                  {file.status === 'uploading' && (
+                      <div className="w-full h-0.5 bg-gray-800 rounded overflow-hidden mt-2">
+                        <div className="progress-fill h-full bg-[#00ff88] rounded" style={{ width: `${file.progress}%` }}></div>
+                      </div>
+                  )}
                 </div>
-              )}
-            </div>
-          </div>
-          <div className="file-status">
-            <div className={`status-dot ${file.status}`}></div>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className={`w-1.5 h-1.5 rounded-full ${file.status === 'uploading' ? 'bg-yellow-400 status-dot pending' : 'bg-[#00ff88]'}`}></div>
+                <span className="text-xs text-gray-500">
               {file.status === 'uploading' ? 'Sending...' : file.status === 'uploaded' ? 'Sent' : 'Downloaded'}
             </span>
-          </div>
-        </div>
-      ))}
-    </div>
+              </div>
+            </div>
+        ))}
+      </div>
   );
 }
 
@@ -100,70 +122,104 @@ export default function SendPage(){
   };
 
   const onDrop = (e) => {
-    e.preventDefault(); e.currentTarget.classList.remove('dragover');
+    e.preventDefault();
+    e.currentTarget.classList.remove('border-[#00ff88]', 'bg-[rgba(0,255,136,0.1)]');
     const files = Array.from(e.dataTransfer.files);
     processFiles(files);
   };
-  const onDragOver = (e) => { e.preventDefault(); e.currentTarget.classList.add('dragover'); };
-  const onFileSelect = (e) => { const files = Array.from(e.target.files); processFiles(files); };
+  const onDragOver = (e) => {
+    e.preventDefault();
+    e.currentTarget.classList.add('border-[#00ff88]', 'bg-[rgba(0,255,136,0.1)]');
+  };
+  const onFileSelect = (e) => {
+    const files = Array.from(e.target.files);
+    processFiles(files);
+  };
 
   return (
-    <div className="container">
-      <Nav />
+      <div className="max-w-7xl mx-auto px-8">
+        <Nav />
 
-      <div className="view" id="send">
-        <div className="text-center mb-lg">
-          <h1 className="display-1">Join session</h1>
-          <p className="subtitle">Enter the code from the receiving device</p>
+        <div className="min-h-[70vh]" id="send">
+          <div className="text-center mb-8">
+            <h1 className="text-6xl lg:text-8xl xl:text-9xl font-normal leading-tight tracking-tight mb-6">Join session</h1>
+            <p className="text-lg text-gray-400 leading-relaxed text-center max-w-2xl mx-auto mb-16">Enter the code from the receiving device</p>
+          </div>
+
+          {!isConnected && (
+              <div id="joinStep" className="bg-gray-900 border border-gray-800 rounded-lg p-12 text-center">
+                <h3 className="text-2xl lg:text-3xl font-normal leading-tight mb-8">Enter Pairing Code</h3>
+                <OTPInputs onChange={setCode} />
+                <div>
+                  <button
+                      className={`inline-flex items-center gap-2 px-6 py-4 border rounded text-base font-medium transition-all duration-150 ${canJoin ? 'bg-[#00ff88] text-black border-[#00ff88] hover:opacity-90' : 'bg-gray-900 text-white border-gray-800 cursor-not-allowed opacity-50'}`}
+                      onClick={join}
+                      disabled={!canJoin}
+                  >
+                    Join Session
+                  </button>
+                  <button
+                      className="inline-flex items-center gap-2 px-6 py-4 border border-gray-800 rounded bg-gray-900 text-white text-base font-medium ml-6 transition-all duration-150 hover:bg-gray-800 hover:border-gray-500"
+                      onClick={()=>setModalOpen(true)}
+                  >
+                    Scan QR
+                  </button>
+                </div>
+              </div>
+          )}
+
+          {isConnected && (
+              <div id="uploadStep" className="bg-gray-900 border border-gray-800 rounded-lg p-12">
+                <div className="flex items-center gap-6 mb-8">
+                  <div className="w-8 h-8 rounded flex items-center justify-center text-base bg-[rgba(0,255,136,0.1)] text-[#00ff88]">✓</div>
+                  <div>
+                    <h3 className="text-2xl lg:text-3xl font-normal leading-tight">Connected - Ready to Send</h3>
+                  </div>
+                </div>
+
+                <div
+                    className="border border-dashed border-gray-800 rounded-lg p-12 text-center transition-all duration-150 cursor-pointer my-12 bg-gray-900 hover:border-[#00ff88] hover:bg-[rgba(0,255,136,0.1)]"
+                    role="button"
+                    tabIndex={0}
+                    aria-label="Click to select files or drag and drop"
+                    onClick={() => document.getElementById('fileInput')?.click()}
+                    onDragOver={onDragOver}
+                    onDrop={onDrop}
+                >
+                  <div className="text-3xl mb-6 text-gray-500">📁</div>
+                  <div className="text-base font-medium mb-2">Drop files here or click to browse</div>
+                  <div className="text-gray-500 text-sm">Any file type, up to 100MB each</div>
+                </div>
+                <input type="file" id="fileInput" multiple className="hidden" onChange={onFileSelect} />
+                <UploadList />
+              </div>
+          )}
         </div>
 
-        {!isConnected && (
-          <div id="joinStep" className="card text-center">
-            <h3 className="display-2 mb-lg">Enter Pairing Code</h3>
-            <OTPInputs onChange={setCode} />
-            <div>
-              <button className="btn btn-accent btn-lg" onClick={join} disabled={!canJoin}>Join Session</button>
-              <button className="btn btn-lg" onClick={()=>setModalOpen(true)} style={{ marginLeft: 'var(--space-md)' }}>Scan QR</button>
-            </div>
-          </div>
-        )}
-
-        {isConnected && (
-          <div id="uploadStep" className="card">
-            <div className="state-header">
-              <div className="state-icon success">✓</div>
-              <div>
-                <h3 className="display-2">Connected - Ready to Send</h3>
+        {modalOpen && (
+            <div className="fixed top-0 left-0 w-full h-full bg-black/80 z-[2000] flex items-center justify-center" id="qrModal">
+              <div className="bg-gray-800 border border-gray-800 rounded-lg p-12 max-w-lg w-[90%]">
+                <h3 className="text-2xl lg:text-3xl font-normal leading-tight mb-8">Scan QR Code</h3>
+                <div className="camera-overlay bg-black rounded aspect-[4/3] flex items-center justify-center my-8 border border-gray-800 relative">
+                  <p className="text-gray-500 text-sm">Camera simulation</p>
+                </div>
+                <div className="mt-8 text-center">
+                  <button
+                      className="inline-flex items-center gap-2 px-6 py-4 border bg-[#00ff88] text-black border-[#00ff88] rounded text-base font-medium transition-all duration-150 hover:opacity-90"
+                      onClick={simulateScan}
+                  >
+                    Detect Code
+                  </button>
+                  <button
+                      className="inline-flex items-center gap-2 px-6 py-4 border border-gray-800 rounded bg-gray-900 text-white text-base font-medium ml-6 transition-all duration-150 hover:bg-gray-800 hover:border-gray-500"
+                      onClick={()=>setModalOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             </div>
-
-            <div className="upload-zone" role="button" tabIndex={0} aria-label="Click to select files or drag and drop"
-                 onClick={() => document.getElementById('fileInput')?.click()}
-                 onDragOver={onDragOver} onDrop={onDrop}>
-              <div className="upload-icon">📁</div>
-              <div className="upload-title">Drop files here or click to browse</div>
-              <div className="upload-subtitle">Any file type, up to 100MB each</div>
-            </div>
-            <input type="file" id="fileInput" multiple style={{ display: 'none' }} onChange={onFileSelect} />
-            <UploadList />
-          </div>
         )}
       </div>
-
-      {modalOpen && (
-        <div className="modal-overlay" id="qrModal">
-          <div className="modal">
-            <h3 className="display-2 mb-lg">Scan QR Code</h3>
-            <div className="camera-overlay">
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Camera simulation</p>
-            </div>
-            <div className="mt-lg text-center">
-              <button className="btn btn-accent btn-lg" onClick={simulateScan}>Detect Code</button>
-              <button className="btn btn-lg" onClick={()=>setModalOpen(false)} style={{ marginLeft: 'var(--space-md)' }}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
   );
 }

@@ -22,14 +22,14 @@ export function useToast() { return useContext(ToastCtx); }
 
 function Toasts({ toasts }) {
   return (
-    <div className="toast-container" id="toastContainer" aria-live="polite" aria-atomic="true">
-      {toasts.map((t) => (
-        <div key={t.id} className={`toast ${t.type}`}>
-          <span>{t.type === "success" ? "✓" : "✕"}</span>
-          <span>{t.message}</span>
-        </div>
-      ))}
-    </div>
+      <div className="fixed top-8 right-8 z-[1000] flex flex-col gap-4" id="toastContainer" aria-live="polite" aria-atomic="true">
+        {toasts.map((t) => (
+            <div key={t.id} className={`toast bg-gray-900 border border-gray-800 rounded px-6 py-4 text-white min-w-[280px] flex items-center gap-2 text-sm ${t.type === 'success' ? 'border-l-2 border-l-[#00ff88]' : 'border-l-2 border-l-red-400'}`}>
+              <span>{t.type === "success" ? "✓" : "✕"}</span>
+              <span>{t.message}</span>
+            </div>
+        ))}
+      </div>
   );
 }
 
@@ -182,11 +182,11 @@ export default function InstantShareProvider({ children }) {
   }), [currentSession, autoDownload, timeLeft, files, isConnected, formatTime, formatFileSize, createPairing, joinWithCode, processFiles, downloadFile, toggleAutoDownload, resetSession, showToast]);
 
   return (
-    <ToastCtx.Provider value={{ show: showToast }}>
-      <AppCtx.Provider value={value}>
-        <Toasts toasts={toasts} />
-        {children}
-      </AppCtx.Provider>
-    </ToastCtx.Provider>
+      <ToastCtx.Provider value={{ show: showToast }}>
+        <AppCtx.Provider value={value}>
+          <Toasts toasts={toasts} />
+          {children}
+        </AppCtx.Provider>
+      </ToastCtx.Provider>
   );
 }
