@@ -24,7 +24,6 @@ export default function RootLayout({ children }) {
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-black text-white`}
       >
         <InstantShareProvider>
-          {/* dotted pattern footer */}
           <div
             aria-hidden
             className="fixed left-0 right-0 bottom-0 h-[200px] pointer-events-none opacity-30 -z-10"

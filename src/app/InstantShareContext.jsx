@@ -9,7 +9,10 @@ import React, {
   useCallback,
 } from "react";
 
-/* Simple Event Bus */
+import {api} from "@/lib/api";
+import {WebSocketService} from "@/lib/websocket";
+import QRCode from "qrcode";
+
 class EventBus {
   constructor() {
     this.events = {};
@@ -26,7 +29,6 @@ class EventBus {
   }
 }
 
-/* Toasts */
 const ToastCtx = createContext();
 export function useToast() {
   return useContext(ToastCtx);
@@ -58,11 +60,12 @@ function Toasts({ toasts }) {
   );
 }
 
-/* App Context */
 const AppCtx = createContext(null);
 export function useApp() {
   return useContext(AppCtx);
 }
+
+
 
 export default function InstantShareProvider({ children }) {
   const [currentSession, setCurrentSession] = useState(null);
@@ -70,11 +73,13 @@ export default function InstantShareProvider({ children }) {
   const [timeLeft, setTimeLeft] = useState(600);
   const [files, setFiles] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const countdownRef = useRef(null);
   const busRef = useRef(new EventBus());
+  const wsRef = useRef(null);
+  const sessionIdRef = useRef(null);
 
-  // Toast manager
   const [toasts, setToasts] = useState([]);
   const showToast = useCallback((message, type = "success", duration = 3000) => {
     const id = Math.random().toString(36).slice(2);
@@ -84,12 +89,17 @@ export default function InstantShareProvider({ children }) {
     }, duration);
   }, []);
 
-  // Utilities
   const formatTime = useCallback((seconds) => {
     const m = Math.floor(seconds / 60);
     const s = (seconds % 60).toString().padStart(2, "0");
     return `${m}:${s}`;
   }, []);
+
+  const normalizeCode = (c) => (c || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  const withHyphen = (c) => {
+    const n = normalizeCode(c);
+    return n.length === 6 ? `${n.slice(0,3)}-${n.slice(3)}` : n;
+  };
 
   const formatFileSize = useCallback((bytes) => {
     const units = ["B", "KB", "MB", "GB"];
@@ -102,12 +112,19 @@ export default function InstantShareProvider({ children }) {
     return `${size.toFixed(1)} ${units[i]}`;
   }, []);
 
-  // Session
-  const generateSessionCode = useCallback(() => {
-    return Math.floor(100000 + Math.random() * 900000)
-      .toString()
-      .replace(/(\d{3})(\d{3})/, "$1-$2");
+  useEffect(() => {
+    if (!sessionIdRef.current) {
+      sessionIdRef.current = `client_${Math.random().toString(36).slice(2)}`;
+    }
   }, []);
+
+  useEffect(() => {
+    if (timeLeft === 60 && currentSession) {
+      showToast("Session expires in 1 minute", "error");
+    } else if (timeLeft === 300 && currentSession) {
+      showToast("5 minutes remaining", "error");
+    }
+  }, [timeLeft, currentSession, showToast]);
 
   const startCountdown = useCallback(() => {
     setTimeLeft(600);
@@ -124,89 +141,259 @@ export default function InstantShareProvider({ children }) {
     }, 1000);
   }, []);
 
-  const createPairing = useCallback(() => {
-    const code = generateSessionCode();
-    const secret = Math.random().toString(36).substring(2, 15);
-    setCurrentSession({ code, secret, createdAt: Date.now() });
-    startCountdown();
-    showToast("Pairing session created");
-  }, [generateSessionCode, showToast, startCountdown]);
+  const createPairing = useCallback(async () => {
+    try {
+      setLoading(true);
+
+      const response = await api.createRoom();
+
+      const normalized = normalizeCode(response.code);
+      const display = withHyphen(normalized);
+
+      const qrData =
+          response.qrCodeData ||
+          (await QRCode.toDataURL(display, { width: 200, margin: 1 }));
+
+      setCurrentSession({
+        id: response.roomId,
+        code: normalized,          // internal (no hyphen)
+        codeDisplay: display,      // UI only
+        secret: response.secret || "",
+        qrCodeData: qrData,
+        createdAt: Date.now(),
+      });
+
+      startCountdown();
+
+      wsRef.current = new WebSocketService();
+      wsRef.current.connect(response.roomId);
+
+      wsRef.current.subscribe("ROOM_JOINED", () => {
+        setIsConnected(true);
+        busRef.current.emit("phoneJoined");
+        showToast("Device connected!");
+      });
+
+      wsRef.current.subscribe("FILE_UPLOADED", (fileData) => {
+        setFiles((prev) => [
+          ...prev,
+          {
+            id: fileData.id,
+            name: fileData.name,
+            size: fileData.size,
+            status: "uploaded",
+            progress: 100,
+          },
+        ]);
+        busRef.current.emit("fileUploaded", fileData);
+        showToast(`Received ${fileData.name}`);
+      });
+
+      wsRef.current.subscribe("ROOM_EXPIRED", () => {
+        showToast("Session expired", "error");
+        resetSession();
+      });
+
+      showToast("Pairing session created");
+    } catch (error) {
+      console.error("Failed to create room:", error);
+      showToast("Failed to create session. Try again.", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [showToast, startCountdown]);
+
 
   const joinWithCode = useCallback(
-    (code6) => {
-      const formatted = code6.substring(0, 3) + "-" + code6.substring(3);
-      if (currentSession && currentSession.code === formatted) {
-        setIsConnected(true);
-        busRef.current.emit("phoneJoined", { code: formatted });
-        showToast("Successfully joined session");
-        return true;
-      }
-      showToast("Invalid code. Please try again.", "error");
-      return false;
+      async (code6) => {
+        try {
+          setLoading(true);
+
+          const formatted = normalizeCode(code6);
+          if (formatted.length !== 6) {
+            showToast("Enter a 6-character code", "error");
+            return false;
+          }
+
+          const response = await api.joinRoom(formatted, sessionIdRef.current);
+
+          if (response.success) {
+            setCurrentSession({
+              id: response.roomId,
+              code: formatted,
+              codeDisplay: withHyphen(formatted),
+              secret: "",
+            });
+            setIsConnected(true);
+
+            wsRef.current = new WebSocketService();
+            wsRef.current.connect(response.roomId);
+
+            wsRef.current.subscribe('FILE_DOWNLOADED', (fileData) => {
+              setFiles(prev => prev.map(f =>
+                  f.id === fileData.id ? { ...f, status: 'downloaded' } : f
+              ));
+            });
+
+            busRef.current.emit("phoneJoined", { code: formatted });
+            showToast("Successfully joined session");
+            return true;
+          } else {
+            showToast(response.message || "Failed to join", "error");
+            return false;
+          }
+        } catch (error) {
+          console.error('Failed to join room:', error);
+          showToast("Invalid code. Please try again.", "error");
+          return false;
+        } finally {
+          setLoading(false);
+        }
     },
     [currentSession, showToast]
   );
 
-  const processFiles = useCallback(
-    (selectedFiles) => {
-      if (!isConnected) {
-        showToast("Please join a session first", "error");
-        return;
-      }
-      selectedFiles.forEach((file) => {
-        const fileObj = {
-          id: Math.random().toString(36).slice(2),
-          name: file.name,
-          size: file.size,
-          status: "uploading",
-          progress: 0,
-        };
-        setFiles((prev) => [...prev, fileObj]);
+  const processFiles = useCallback(async (selectedFiles) => {
+    if (!isConnected) {
+      showToast("Please join a session first", "error");
+      return;
+    }
 
-        // simulate upload
-        const duration = 1000 + Math.random() * 2000;
-        const interval = 50;
-        const steps = duration / interval;
-        const step = 100 / steps;
-        let cur = 0;
-        const timer = setInterval(() => {
-          cur += step;
-          setFiles((prev) =>
-            prev.map((f) =>
-              f.id === fileObj.id ? { ...f, progress: Math.min(cur, 100) } : f
-            )
-          );
-          if (cur >= 100) {
-            clearInterval(timer);
-            setFiles((prev) =>
-              prev.map((f) =>
-                f.id === fileObj.id
-                  ? { ...f, status: "uploaded", progress: 100 }
-                  : f
-              )
-            );
-            busRef.current.emit("fileUploaded", {
-              ...fileObj,
-              status: "uploaded",
-              progress: 100,
-            });
-            showToast(`${fileObj.name} sent successfully`);
+    const MAX_SIZE = 100 * 1024 * 1024; // 100MB
+    const oversizedFiles = selectedFiles.filter(f => f.size > MAX_SIZE);
+
+    if (oversizedFiles.length > 0) {
+      showToast(
+          `Some files exceed 100MB: ${oversizedFiles.map(f => f.name).join(', ')}`,
+          "error"
+      );
+      selectedFiles = selectedFiles.filter(f => f.size <= MAX_SIZE);
+    }
+
+    if (selectedFiles.length === 0) return;
+
+    for (const file of selectedFiles) {
+      const tempId = Math.random().toString(36).slice(2);
+      const fileObj = {
+        id: tempId,
+        name: file.name,
+        size: file.size,
+        status: "uploading",
+        progress: 0
+      };
+      setFiles(prev => [...prev, fileObj]);
+
+      try {
+        const { signedUrl, objectPath } = await api.requestUpload(
+            currentSession.id,
+            file.name,
+            file.size,
+            file.type || "application/octet-stream"
+        );
+
+        const xhr = new XMLHttpRequest();
+
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            const progress = (e.loaded / e.total) * 100;
+            setFiles(prev => prev.map(f =>
+                f.id === tempId ? { ...f, progress } : f
+            ));
           }
-        }, interval);
-      });
-    },
-    [isConnected, showToast]
-  );
+        });
+
+        xhr.addEventListener('load', async () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const metadata = await api.confirmUpload({
+                roomId: currentSession.id,
+                fileName: file.name,
+                objectPath,
+                contentType: file.type,
+                fileSize: file.size,
+              });
+
+              setFiles(prev => prev.map(f =>
+                  f.id === tempId
+                      ? { ...f, status: "uploaded", progress: 100, serverFileId: metadata.id }
+                      : f
+              ));
+
+              busRef.current.emit("fileUploaded", {
+                ...fileObj,
+                status: "uploaded",
+                serverFileId: metadata.id,
+              });
+
+              showToast(`${file.name} sent successfully`);
+            } catch (confirmError) {
+              console.error('Failed to confirm upload:', confirmError);
+              setFiles(prev => prev.map(f =>
+                  f.id === tempId ? { ...f, status: "error" } : f
+              ));
+              showToast(`Failed to confirm ${file.name}`, "error");
+            }
+          } else {
+            setFiles(prev => prev.map(f =>
+                f.id === tempId ? { ...f, status: "error" } : f
+            ));
+            showToast(`Failed to upload ${file.name}`, "error");
+          }
+        });
+
+        xhr.addEventListener('error', () => {
+          setFiles(prev => prev.map(f =>
+              f.id === tempId ? { ...f, status: "error" } : f
+          ));
+          showToast(`Failed to upload ${file.name}`, "error");
+        });
+
+        xhr.open('PUT', signedUrl);
+        xhr.setRequestHeader('Content-Type', file.type);
+        xhr.send(file);
+
+      } catch (error) {
+        console.error('Upload failed:', error);
+        setFiles(prev => prev.map(f =>
+            f.id === tempId ? { ...f, status: "error" } : f
+        ));
+        showToast(`Failed to upload ${file.name}`, "error");
+      }
+    }
+  }, [isConnected, currentSession, showToast]);
+
 
   const downloadFile = useCallback(
-    (id) => {
-      setFiles((prev) =>
-        prev.map((f) => (f.id === id ? { ...f, status: "downloaded" } : f))
-      );
-      const f = files.find((x) => x.id === id);
-      if (f) showToast(`Downloaded ${f.name}`);
-    },
-    [files, showToast]
+      async (fileId) => {
+        if (!currentSession) return;
+
+        try {
+          const file = files.find(f => f.id === fileId);
+          if (!file) return;
+
+          const response = await api.getDownloadUrl(
+              currentSession.id,
+              file.serverFileId || fileId
+          );
+
+          const link = document.createElement('a');
+          link.href = response.downloadUrl;
+          link.download = file.name;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+
+          setFiles(prev => prev.map(f =>
+              f.id === fileId ? { ...f, status: "downloaded" } : f
+          ));
+
+          showToast(`Downloaded ${file.name}`);
+        } catch (error) {
+          console.error('Download failed:', error);
+          showToast(`Failed to download file`, "error");
+        }
+      },
+      [currentSession, files, showToast]
   );
 
   const toggleAutoDownload = useCallback(() => {
@@ -217,17 +404,65 @@ export default function InstantShareProvider({ children }) {
     });
   }, [showToast]);
 
-  const resetSession = useCallback(() => {
+    const downloadAllFiles = useCallback(async () => {
+        if (!currentSession || files.length === 0) {
+            showToast("No files to download", "error");
+            return;
+        }
+
+        const uploadedFiles = files.filter(f => f.status === "uploaded");
+
+        if (uploadedFiles.length === 0) {
+            showToast("No files available to download", "error");
+            return;
+        }
+
+        showToast(`Downloading ${uploadedFiles.length} file(s)...`);
+
+        for (const file of uploadedFiles) {
+            await downloadFile(file.id);
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
+        showToast("All files downloaded!");
+    }, [currentSession, files, downloadFile, showToast]);
+
+  const leaveRoom = useCallback(async () => {
+    const hasFiles = files.length > 0;
+
+    if (hasFiles) {
+      const confirmed = window.confirm(
+          "Are you sure you want to leave? Any unsent files will be lost."
+      );
+      if (!confirmed) return;
+    }
+
     if (countdownRef.current) clearInterval(countdownRef.current);
+
+    if (wsRef.current && currentSession) {
+      try {
+        wsRef.current.send({
+          type: 'LEAVE_ROOM',
+          roomId: currentSession.id
+        });
+      } catch (e) {
+        console.error('Failed to notify server:', e);
+      }
+    }
+
+    if (wsRef.current) wsRef.current.disconnect();
+
     setCurrentSession(null);
     setAutoDownload(false);
     setTimeLeft(600);
     setFiles([]);
     setIsConnected(false);
-    showToast("Session reset successfully");
-  }, [showToast]);
 
-  // Auto-download behavior
+    showToast("Left session");
+  }, [currentSession, files, showToast]);
+
+    const resetSession = leaveRoom;
+
   useEffect(() => {
     const off = busRef.current.on("fileUploaded", (file) => {
       if (autoDownload && file.status === "uploaded") {
@@ -244,6 +479,14 @@ export default function InstantShareProvider({ children }) {
     return off;
   }, [autoDownload, showToast]);
 
+  useEffect(() => {
+    if (timeLeft === 60 && currentSession) {
+      showToast("Session expires in 1 minute", "error");
+    } else if (timeLeft === 300 && currentSession) {
+      showToast("5 minutes remaining", "error");
+    }
+  }, [timeLeft, currentSession, showToast]);
+
   const value = useMemo(
     () => ({
       currentSession,
@@ -257,6 +500,8 @@ export default function InstantShareProvider({ children }) {
       joinWithCode,
       processFiles,
       downloadFile,
+      leaveRoom,
+      downloadAllFiles,
       toggleAutoDownload,
       resetSession,
       bus: busRef.current,
@@ -273,6 +518,8 @@ export default function InstantShareProvider({ children }) {
       createPairing,
       joinWithCode,
       processFiles,
+      leaveRoom,
+      downloadAllFiles,
       downloadFile,
       toggleAutoDownload,
       resetSession,
