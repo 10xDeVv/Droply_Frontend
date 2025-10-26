@@ -156,8 +156,8 @@ export default function InstantShareProvider({ children }) {
 
       setCurrentSession({
         id: response.roomId,
-        code: normalized,          // internal (no hyphen)
-        codeDisplay: display,      // UI only
+        code: normalized,
+        codeDisplay: display,
         secret: response.secret || "",
         qrCodeData: qrData,
         createdAt: Date.now(),
@@ -168,25 +168,40 @@ export default function InstantShareProvider({ children }) {
       wsRef.current = new WebSocketService();
       wsRef.current.connect(response.roomId);
 
-      wsRef.current.subscribe("ROOM_JOINED", () => {
+      wsRef.current.subscribe("ROOM_JOINED", (payload) => {
         setIsConnected(true);
         busRef.current.emit("phoneJoined");
         showToast("Device connected!");
       });
 
-      wsRef.current.subscribe("FILE_UPLOADED", (fileData) => {
+      wsRef.current.subscribe("PEER_JOINED", (payload) => {
+        setIsConnected(true);
+        busRef.current.emit("phoneJoined");
+        showToast("Sender connected!");
+      });
+
+      wsRef.current.subscribe("FILE_UPLOADED", (payload) => {
         setFiles((prev) => [
           ...prev,
           {
-            id: fileData.id,
-            name: fileData.name,
-            size: fileData.size,
+            id: payload.id,
+            name: payload.name,
+            size: payload.size,
             status: "uploaded",
             progress: 100,
           },
         ]);
-        busRef.current.emit("fileUploaded", fileData);
-        showToast(`Received ${fileData.name}`);
+        busRef.current.emit("fileUploaded", payload);
+        showToast(`Received ${payload.name}`);
+      });
+
+      wsRef.current.subscribe("FILE_DOWNLOADED", (payload) => {
+
+        setFiles(prev => prev.map(f =>
+            f.serverFileId === payload.id || f.id === payload.id
+                ? { ...f, status: "downloaded" }
+                : f
+        ));
       });
 
       wsRef.current.subscribe("ROOM_EXPIRED", () => {
