@@ -36,27 +36,27 @@ export function useToast() {
 
 function Toasts({ toasts }) {
   return (
-    <div
-      id="toastContainer"
-      aria-live="polite"
-      aria-atomic="true"
-      className="fixed top-8 right-8 z-[1000] flex flex-col gap-4"
-    >
-      {toasts.map((t) => (
-        <div
-          key={t.id}
-          className={`flex items-center gap-2 bg-[#111] text-white border border-[#222] rounded p-4 min-w-[280px] text-sm animate-[slideIn_0.3s_ease_forwards] ${
-            t.type === "success" ? "border-l-2" : "border-l-2"
-          }`}
-          style={{
-            borderLeftColor: t.type === "success" ? "#00ff88" : "#ff4757",
-          }}
-        >
-          <span>{t.type === "success" ? "✓" : "✕"}</span>
-          <span className="text-white/90">{t.message}</span>
-        </div>
-      ))}
-    </div>
+      <div
+          id="toastContainer"
+          aria-live="polite"
+          aria-atomic="true"
+          className="fixed top-8 right-8 z-[1000] flex flex-col gap-4"
+      >
+        {toasts.map((t) => (
+            <div
+                key={t.id}
+                className={`flex items-center gap-2 bg-[#111] text-white border border-[#222] rounded p-4 min-w-[280px] text-sm animate-[slideIn_0.3s_ease_forwards] ${
+                    t.type === "success" ? "border-l-2" : "border-l-2"
+                }`}
+                style={{
+                  borderLeftColor: t.type === "success" ? "#00ff88" : "#ff4757",
+                }}
+            >
+              <span>{t.type === "success" ? "✓" : "✕"}</span>
+              <span className="text-white/90">{t.message}</span>
+            </div>
+        ))}
+      </div>
   );
 }
 
@@ -64,8 +64,6 @@ const AppCtx = createContext(null);
 export function useApp() {
   return useContext(AppCtx);
 }
-
-
 
 export default function InstantShareProvider({ children }) {
   const [currentSession, setCurrentSession] = useState(null);
@@ -79,6 +77,7 @@ export default function InstantShareProvider({ children }) {
   const busRef = useRef(new EventBus());
   const wsRef = useRef(null);
   const sessionIdRef = useRef(null);
+  const unsubscribersRef = useRef([]);
 
   const [toasts, setToasts] = useState([]);
   const showToast = useCallback((message, type = "success", duration = 3000) => {
@@ -118,14 +117,6 @@ export default function InstantShareProvider({ children }) {
     }
   }, []);
 
-  useEffect(() => {
-    if (timeLeft === 60 && currentSession) {
-      showToast("Session expires in 1 minute", "error");
-    } else if (timeLeft === 300 && currentSession) {
-      showToast("5 minutes remaining", "error");
-    }
-  }, [timeLeft, currentSession, showToast]);
-
   const startCountdown = useCallback(() => {
     setTimeLeft(600);
     if (countdownRef.current) clearInterval(countdownRef.current);
@@ -141,9 +132,22 @@ export default function InstantShareProvider({ children }) {
     }, 1000);
   }, []);
 
+  const cleanupWebSocketSubscriptions = useCallback(() => {
+    unsubscribersRef.current.forEach(unsub => {
+      try {
+        unsub();
+      } catch (e) {
+        console.error('Error unsubscribing:', e);
+      }
+    });
+    unsubscribersRef.current = [];
+  }, []);
+
   const createPairing = useCallback(async () => {
     try {
       setLoading(true);
+
+      cleanupWebSocketSubscriptions();
 
       const response = await api.createRoom();
 
@@ -168,19 +172,15 @@ export default function InstantShareProvider({ children }) {
       wsRef.current = new WebSocketService();
       wsRef.current.connect(response.roomId);
 
-      wsRef.current.subscribe("ROOM_JOINED", (payload) => {
-        setIsConnected(true);
-        busRef.current.emit("phoneJoined");
-        showToast("Device connected!");
-      });
-
-      wsRef.current.subscribe("PEER_JOINED", (payload) => {
+      const unsubPeerJoined = wsRef.current.subscribe("PEER_JOINED", (payload) => {
+        console.log("🟢 PEER_JOINED received:", payload);
         setIsConnected(true);
         busRef.current.emit("phoneJoined");
         showToast("Sender connected!");
       });
+      unsubscribersRef.current.push(unsubPeerJoined);
 
-      wsRef.current.subscribe("FILE_UPLOADED", (payload) => {
+      const unsubFileUploaded = wsRef.current.subscribe("FILE_UPLOADED", (payload) => {
         setFiles((prev) => [
           ...prev,
           {
@@ -189,25 +189,28 @@ export default function InstantShareProvider({ children }) {
             size: payload.size,
             status: "uploaded",
             progress: 100,
+            serverFileId: payload.id,
           },
         ]);
         busRef.current.emit("fileUploaded", payload);
         showToast(`Received ${payload.name}`);
       });
+      unsubscribersRef.current.push(unsubFileUploaded);
 
-      wsRef.current.subscribe("FILE_DOWNLOADED", (payload) => {
-
+      const unsubFileDownloaded = wsRef.current.subscribe("FILE_DOWNLOADED", (payload) => {
         setFiles(prev => prev.map(f =>
             f.serverFileId === payload.id || f.id === payload.id
                 ? { ...f, status: "downloaded" }
                 : f
         ));
       });
+      unsubscribersRef.current.push(unsubFileDownloaded);
 
-      wsRef.current.subscribe("ROOM_EXPIRED", () => {
+      const unsubRoomExpired = wsRef.current.subscribe("ROOM_EXPIRED", () => {
         showToast("Session expired", "error");
-        resetSession();
+        leaveRoom();
       });
+      unsubscribersRef.current.push(unsubRoomExpired);
 
       showToast("Pairing session created");
     } catch (error) {
@@ -216,13 +219,14 @@ export default function InstantShareProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  }, [showToast, startCountdown]);
-
+  }, [showToast, startCountdown, cleanupWebSocketSubscriptions]);
 
   const joinWithCode = useCallback(
       async (code6) => {
         try {
           setLoading(true);
+
+          cleanupWebSocketSubscriptions();
 
           const formatted = normalizeCode(code6);
           if (formatted.length !== 6) {
@@ -244,11 +248,25 @@ export default function InstantShareProvider({ children }) {
             wsRef.current = new WebSocketService();
             wsRef.current.connect(response.roomId);
 
-            wsRef.current.subscribe('FILE_DOWNLOADED', (fileData) => {
+            const unsubFileDownloaded = wsRef.current.subscribe('FILE_DOWNLOADED', (payload) => {
+              console.log("⬇️ FILE_DOWNLOADED received:", payload);
+
               setFiles(prev => prev.map(f =>
-                  f.id === fileData.id ? { ...f, status: 'downloaded' } : f
+                  f.serverFileId === payload.id || f.id === payload.id
+                      ? { ...f, status: 'downloaded' }
+                      : f
               ));
+
+              showToast(`${payload.name} was downloaded`);
             });
+            unsubscribersRef.current.push(unsubFileDownloaded);
+
+            const unsubRoomExpired = wsRef.current.subscribe('ROOM_EXPIRED', () => {
+              console.log("⏰ ROOM_EXPIRED received");
+              showToast("Session expired", "error");
+              leaveRoom();
+            });
+            unsubscribersRef.current.push(unsubRoomExpired);
 
             busRef.current.emit("phoneJoined", { code: formatted });
             showToast("Successfully joined session");
@@ -264,8 +282,8 @@ export default function InstantShareProvider({ children }) {
         } finally {
           setLoading(false);
         }
-    },
-    [currentSession, showToast]
+      },
+      [showToast, cleanupWebSocketSubscriptions]
   );
 
   const processFiles = useCallback(async (selectedFiles) => {
@@ -274,7 +292,7 @@ export default function InstantShareProvider({ children }) {
       return;
     }
 
-    const MAX_SIZE = 100 * 1024 * 1024; // 100MB
+    const MAX_SIZE = 100 * 1024 * 1024;
     const oversizedFiles = selectedFiles.filter(f => f.size > MAX_SIZE);
 
     if (oversizedFiles.length > 0) {
@@ -377,7 +395,6 @@ export default function InstantShareProvider({ children }) {
     }
   }, [isConnected, currentSession, showToast]);
 
-
   const downloadFile = useCallback(
       async (fileId) => {
         if (!currentSession) return;
@@ -411,6 +428,29 @@ export default function InstantShareProvider({ children }) {
       [currentSession, files, showToast]
   );
 
+  const downloadAllFiles = useCallback(async () => {
+    if (!currentSession || files.length === 0) {
+      showToast("No files to download", "error");
+      return;
+    }
+
+    const uploadedFiles = files.filter(f => f.status === "uploaded");
+
+    if (uploadedFiles.length === 0) {
+      showToast("No files available to download", "error");
+      return;
+    }
+
+    showToast(`Downloading ${uploadedFiles.length} file(s)...`);
+
+    for (const file of uploadedFiles) {
+      await downloadFile(file.id);
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    showToast("All files downloaded!");
+  }, [currentSession, files, downloadFile, showToast]);
+
   const toggleAutoDownload = useCallback(() => {
     setAutoDownload((v) => {
       const nv = !v;
@@ -418,29 +458,6 @@ export default function InstantShareProvider({ children }) {
       return nv;
     });
   }, [showToast]);
-
-    const downloadAllFiles = useCallback(async () => {
-        if (!currentSession || files.length === 0) {
-            showToast("No files to download", "error");
-            return;
-        }
-
-        const uploadedFiles = files.filter(f => f.status === "uploaded");
-
-        if (uploadedFiles.length === 0) {
-            showToast("No files available to download", "error");
-            return;
-        }
-
-        showToast(`Downloading ${uploadedFiles.length} file(s)...`);
-
-        for (const file of uploadedFiles) {
-            await downloadFile(file.id);
-            await new Promise(resolve => setTimeout(resolve, 500));
-        }
-
-        showToast("All files downloaded!");
-    }, [currentSession, files, downloadFile, showToast]);
 
   const leaveRoom = useCallback(async () => {
     const hasFiles = files.length > 0;
@@ -454,18 +471,16 @@ export default function InstantShareProvider({ children }) {
 
     if (countdownRef.current) clearInterval(countdownRef.current);
 
-    if (wsRef.current && currentSession) {
-      try {
-        wsRef.current.send({
-          type: 'LEAVE_ROOM',
-          roomId: currentSession.id
-        });
-      } catch (e) {
-        console.error('Failed to notify server:', e);
-      }
-    }
+    cleanupWebSocketSubscriptions();
 
-    if (wsRef.current) wsRef.current.disconnect();
+    if (wsRef.current) {
+      try {
+        wsRef.current.disconnect();
+      } catch (e) {
+        console.error('Failed to disconnect:', e);
+      }
+      wsRef.current = null;
+    }
 
     setCurrentSession(null);
     setAutoDownload(false);
@@ -474,80 +489,93 @@ export default function InstantShareProvider({ children }) {
     setIsConnected(false);
 
     showToast("Left session");
-  }, [currentSession, files, showToast]);
+  }, [files, showToast, cleanupWebSocketSubscriptions]);
 
-    const resetSession = leaveRoom;
+  const resetSession = leaveRoom;
 
   useEffect(() => {
+    if (!autoDownload) return;
+
     const off = busRef.current.on("fileUploaded", (file) => {
-      if (autoDownload && file.status === "uploaded") {
+      if (file.status === "uploaded") {
         setTimeout(() => {
           setFiles((prev) =>
-            prev.map((f) =>
-              f.id === file.id ? { ...f, status: "downloaded" } : f
-            )
+              prev.map((f) =>
+                  f.id === file.id ? { ...f, status: "downloaded" } : f
+              )
           );
           showToast(`Auto-downloaded ${file.name}`);
         }, 500);
       }
     });
+
     return off;
   }, [autoDownload, showToast]);
 
   useEffect(() => {
-    if (timeLeft === 60 && currentSession) {
+    if (!currentSession) return;
+
+    if (timeLeft === 60) {
       showToast("Session expires in 1 minute", "error");
-    } else if (timeLeft === 300 && currentSession) {
+    } else if (timeLeft === 300) {
       showToast("5 minutes remaining", "error");
     }
   }, [timeLeft, currentSession, showToast]);
 
+  useEffect(() => {
+    return () => {
+      cleanupWebSocketSubscriptions();
+      if (countdownRef.current) clearInterval(countdownRef.current);
+      if (wsRef.current) wsRef.current.disconnect();
+    };
+  }, [cleanupWebSocketSubscriptions]);
+
   const value = useMemo(
-    () => ({
-      currentSession,
-      autoDownload,
-      timeLeft,
-      files,
-      isConnected,
-      formatTime,
-      formatFileSize,
-      createPairing,
-      joinWithCode,
-      processFiles,
-      downloadFile,
-      leaveRoom,
-      downloadAllFiles,
-      toggleAutoDownload,
-      resetSession,
-      bus: busRef.current,
-      showToast,
-    }),
-    [
-      currentSession,
-      autoDownload,
-      timeLeft,
-      files,
-      isConnected,
-      formatTime,
-      formatFileSize,
-      createPairing,
-      joinWithCode,
-      processFiles,
-      leaveRoom,
-      downloadAllFiles,
-      downloadFile,
-      toggleAutoDownload,
-      resetSession,
-      showToast,
-    ]
+      () => ({
+        currentSession,
+        autoDownload,
+        timeLeft,
+        files,
+        isConnected,
+        formatTime,
+        formatFileSize,
+        createPairing,
+        joinWithCode,
+        processFiles,
+        downloadFile,
+        leaveRoom,
+        downloadAllFiles,
+        toggleAutoDownload,
+        resetSession,
+        bus: busRef.current,
+        showToast,
+      }),
+      [
+        currentSession,
+        autoDownload,
+        timeLeft,
+        files,
+        isConnected,
+        formatTime,
+        formatFileSize,
+        createPairing,
+        joinWithCode,
+        processFiles,
+        leaveRoom,
+        downloadAllFiles,
+        downloadFile,
+        toggleAutoDownload,
+        resetSession,
+        showToast,
+      ]
   );
 
   return (
-    <ToastCtx.Provider value={{ show: showToast }}>
-      <AppCtx.Provider value={value}>
-        <Toasts toasts={toasts} />
-        {children}
-      </AppCtx.Provider>
-    </ToastCtx.Provider>
+      <ToastCtx.Provider value={{ show: showToast }}>
+        <AppCtx.Provider value={value}>
+          <Toasts toasts={toasts} />
+          {children}
+        </AppCtx.Provider>
+      </ToastCtx.Provider>
   );
 }

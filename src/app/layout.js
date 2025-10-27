@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: "Droply - Instant File Sharing",
-  description: "Instant file sharing for anyone",
+    title: "LazyDrop - File Sharing for the Lazy Generation",
+    description: "Too lazy for cables? Drop files between devices instantly. No apps, no signups, just works.",
 };
 
 export default function RootLayout({ children }) {

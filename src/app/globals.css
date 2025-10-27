@@ -1,7 +1,6 @@
 @import "tailwindcss";
 @source "../**/*.{js,jsx,ts,tsx}";
 
-/* --- your design tokens --- */
 :root{
   --bg-primary: #000000;
   --bg-secondary: #111111;
@@ -29,12 +28,10 @@
   }
 }
 
-/* Optional focus helper */
 @layer components {
   .focus-outline:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 }
 
-/* Tailwind v4 theme block for custom animations */
 @theme {
   @keyframes slide-in {
     0%   { transform: translateX(100%); opacity: 0 }
@@ -50,7 +47,6 @@
     50%     { opacity: 0.5 }
   }
 
-  /* Creates utilities: animate-slide-in / animate-scan-pulse / animate-pulse-slow */
   --animate-slide-in: slide-in 0.3s ease forwards;
   --animate-scan-pulse: scan-pulse 2s infinite;
   --animate-pulse-slow: pulse-slow 2s infinite;
